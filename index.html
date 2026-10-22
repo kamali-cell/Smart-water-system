@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Water Operations Dashboard</title>
+    <style>
+        :root {
+            --bg: #f8fafc; --card: #ffffff; --primary: #0284c7; --dark: #0f172a;
+            --border: #e2e8f0; --danger: #ef4444; --warning: #f59e0b; --success: #22c55e;
+        }
+        body { font-family: sans-serif; background-color: var(--bg); color: var(--dark); margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        header { margin-bottom: 24px; border-bottom: 2px solid var(--border); padding-bottom: 12px; }
+        h1 { margin: 0; color: var(--primary); }
+        .alert-zone { margin-bottom: 20px; }
+        .alert-card { background: #fef2f2; border-left: 4px solid var(--danger); color: #991b1b; padding: 12px; margin-bottom: 8px; border-radius: 4px; display: flex; justify-content: space-between; font-weight: bold; }
+        .analytics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .metric-card { background: var(--card); padding: 16px; border-radius: 8px; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .metric-card h3 { margin: 0 0 6px 0; font-size: 0.85rem; color: #64748b; text-transform: uppercase; }
+        .metric-card .val { font-size: 1.6rem; font-weight: bold; color: var(--primary); }
+        .controls { margin-bottom: 20px; }
+        select { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); width: 250px; }
+        .zone-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .zone-card { background: var(--card); border-radius: 8px; border: 1px solid var(--border); padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .zone-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        .status-badge { padding: 4px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; }
+        .normal { background: #dcfce7; color: #166534; }
+        .critical { background: #fee2e2; color: #991b1b; }
+        .data-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+        .lbl { color: #64748b; }
+        .p-bar-bg { background: var(--border); border-radius: 4px; height: 8px; width: 100%; overflow: hidden; margin-top: 4px; }
+        .p-bar { height: 100%; background: var(--primary); }
+        .p-bar.low { background: var(--danger); }
+        .table-container { background: var(--card); border-radius: 8px; border: 1px solid var(--border); padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th, td { padding: 12px; border-bottom: 1px solid var(--border); }
+        th { background: #f8fafc; color: #64748b; }
+        .sev-high { color: var(--danger); font-weight: bold; }
+        .sev-med { color: var(--warning); font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Smart Water Distribution & Leakage Monitoring</h1>
+            <p>Live SCADA network pipeline telemetry metrics and flow anomalies.</p>
+        </header>
+
+        <div id="alerts" class="alert-zone"></div>
+
+        <!-- Zone Analytics (Enhancement Component) -->
+        <div class="analytics-grid">
+            <div class="metric-card"><h3>Total Water Supplied</h3><div class="val" id="total-supply">0 kL</div></div>
+            <div class="metric-card"><h3>Highest Consumption Zone</h3><div class="val" id="peak-zone">-</div></div>
+            <div class="metric-card"><h3>Suspected Leak Incidents</h3><div class="val" id="leak-count" style="color:var(--danger)">0</div></div>
+        </div>
+
+        <!-- Filtering Control (Enhancement Component) -->
+        <div class="controls">
+            <select id="filter" onchange="renderDashboard()">
+                <option value="all">All Distribution Zones</option>
+                <option value="North Zone">North Zone</option>
+                <option value="South Zone">South Zone</option>
+                <option value="East Zone">East Zone</option>
+                <option value="West Zone">West Zone</option>
+                <option value="Central Metro">Central Metro</option>
+            </select>
+        </div>
+
+        <div class="zone-grid" id="zone-grid"></div>
+
+        <!-- Leakage Incident Table (Enhancement Component) -->
+        <div class="table-container">
+            <h2>Active Leakage & Maintenance Logs</h2>
+            <table>
+                <thead>
+                    <tr><th>Incident ID</th><th>Zone</th><th>Severity</th><th>Detection Time</th><th>Maintenance Status</th></tr>
+                </thead>
+                <tbody id="incidents-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // System Threshold Constraints
+        const MIN_PRESSURE = 1.8; const MAX_PRESSURE = 4.2; const LOW_RESERVOIR = 25;
+
+        // Simulated real-time water network status matrices (At least 5 zones)
+        let networkZones = [
+            { name: "North Zone", reservoir: 72, supply: 1450, pressure: 2.8, schedule: "06:00 - 09:00", activeLeak: false },
+            { name: "South Zone", reservoir: 18, supply: 920, pressure: 3.2, schedule: "07:00 - 10:00", activeLeak: true },
+            { name: "East Zone", reservoir: 54, supply: 1680, pressure: 1.4, schedule: "05:30 - 08:30", activeLeak: true },
+            { name: "West Zone", reservoir: 85, supply: 1150, pressure: 3.9, schedule: "08:00 - 11:00", activeLeak: false },
+            { name: "Central Metro", reservoir: 42, supply: 2400, pressure: 4.6, schedule: "06:00 - 11:00", activeLeak: false }
+        ];
+
+        let incidentsLog = [
+            { id: "L-201", zone: "South Zone", severity: "Medium", time: "2026-10-22 09:12", status: "Technician Dispatched" },
+            { id: "L-204", zone: "East Zone", severity: "High", time: "2026-10-22 11:45", status: "Isolating Main Valve" }
+        ];
+
+        function renderDashboard() {
+            const filterScope = document.getElementById('filter').value;
+            const grid = document.getElementById('zone-grid');
+            const alertBox = document.getElementById('alerts');
+            const tableBody = document.getElementById('incidents-body');
+            
+            grid.innerHTML = ''; alertBox.innerHTML = ''; tableBody.innerHTML = '';
+            let totalVolume = 0; let peakZone = { name: '-', supply: 0 };
+            let alertsHtml = '';
+
+            networkZones.forEach(zone => {
+                totalVolume += zone.supply;
+                if(zone.supply > peakZone.supply) peakZone = { name: zone.name, supply: zone.supply };
+
+                let anomalous = false;
+                if(zone.reservoir < LOW_RESERVOIR) {
+                    anomalous = true;
+                    alertsHtml += `<div class="alert-card"><span>⚠️ [CRITICAL] ${zone.name}: Reservoir Level dropped below 25% (${zone.reservoir}%)</span></div>`;
+                }
+                if(zone.pressure < MIN_PRESSURE || zone.pressure > MAX_PRESSURE) {
+                    anomalous = true;
+                    alertsHtml += `<div class="alert-card"><span>⚠️ [PRESSURE ANOMALY] ${zone.name}: Abnormal pressure registered at ${zone.pressure} Bar</span></div>`;
+                }
+
+                if (filterScope !== 'all' && zone.name !== filterScope) return;
+
+                const card = document.createElement('div');
+                card.className = 'zone-card';
+                card.innerHTML = `
+                    <div class="zone-header">
+                        <h3>${zone.name}</h3>
+                        <span class="status-badge ${anomalous || zone.activeLeak ? 'critical' : 'normal'}">
+                            ${anomalous || zone.activeLeak ? 'ANOMALY ALERT' : 'HEALTHY'}
+                        </span>
+                    </div>
+                    <div class="data-row"><span class="lbl">Reservoir Capacity</span><strong>${zone.reservoir}%</strong></div>
+                    <div class="p-bar-bg"><div class="p-bar ${zone.reservoir < 25 ? 'low' : ''}" style="width: ${zone.reservoir}%"></div></div>
+                    <div style="margin-top:10px"></div>
+                    <div class="data-row"><span class="lbl">Pipeline Pressure</span><strong>${zone.pressure} Bar</strong></div>
+                    <div class="data-row"><span class="lbl">Daily Volume Supply</span><strong>${zone.supply} kL</strong></div>
+                    <div class="data-row"><span class="lbl">Delivery Timings</span><strong>${zone.schedule}</strong></div>
+                `;
+                grid.appendChild(card);
+            });
+
+            document.getElementById('total-supply').innerText = `${totalVolume.toLocaleString()} kL`;
+            document.getElementById('peak-zone').innerText = peakZone.name;
+            document.getElementById('leak-count').innerText = incidentsLog.length;
+            alertBox.innerHTML = alertsHtml;
+
+            incidentsLog.forEach(inc => {
+                tableBody.innerHTML += `<tr><td><code>${inc.id}</code></td><td><strong>${inc.zone}</strong></td>
+                    <td><span class="${inc.severity==='High'?'sev-high':'sev-med'}">${inc.severity}</span></td>
+                    <td>${inc.time}</td><td><em>${inc.status}</em></td></tr>`;
+            });
+        }
+
+        // Live SCADA Data Telemetry Loop
+        setInterval(() => {
+            networkZones.forEach(zone => {
+                zone.pressure = parseFloat((zone.pressure + (Math.random() * 0.4 - 0.2)).toFixed(2));
+                if(Math.random() > 0.7 && zone.reservoir > 4) zone.reservoir -= 1;
+            });
+            renderDashboard();
+        }, 3000);
+
+        window.onload = renderDashboard;
